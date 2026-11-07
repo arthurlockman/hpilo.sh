@@ -37,13 +37,15 @@ if [ -n "${TS_AUTHKEY:-}" ]; then
   # Auth keys expire (max 90 days), but a tagged node's key never does.
   # Only authenticate when this container isn't already logged in, so an
   # expired key never blocks restarts of a healthy node.
+  # accept-routes is required in userspace mode when the iLO is reached via
+  # a subnet router; without it tailscaled drops subnet-routed connections.
   if ! tailscale status >/dev/null 2>&1; then
-    if ! tailscale up --authkey="${TS_AUTHKEY}" --hostname="${TS_HOSTNAME:-hpilo-cert}" ${TS_EXTRA_ARGS:-}; then
+    if ! tailscale up --authkey="${TS_AUTHKEY}" --accept-routes --hostname="${TS_HOSTNAME:-hpilo-cert}" ${TS_EXTRA_ARGS:-}; then
       print_err "tailscale up failed (invalid auth key, or ACL/CLI error). See /var/log/tailscaled.log"
       exit 1
     fi
   else
-    tailscale up --hostname="${TS_HOSTNAME:-hpilo-cert}" >/dev/null
+    tailscale up --accept-routes --hostname="${TS_HOSTNAME:-hpilo-cert}" >/dev/null
   fi
   export ILO_TAILSCALE=1
   export ALL_PROXY=socks5h://127.0.0.1:1055
