@@ -71,7 +71,7 @@ All configuration is passed via environment variables:
 | `ILO_DOMAIN`         | `DOMAIN`       | Required. Registered domain name.                            |
 | `ILO_STAGING`        | `STAGING`      | `0` (default) or `1` for Let's Encrypt staging.              |
 | `ILO_DNSAPI`         | `DNSAPI`       | acme.sh DNS provider, default `dns_cf` (Cloudflare).         |
-| `ILO_CERT_DOMAIN`    | `CERT_DOMAIN`  | Optional. Domain used for the certificate when the iLO's own domain (e.g. DHCP-assigned) differs from `ILO_DOMAIN`. |
+| `ILO_ACME_CA`       | `ACME_CA`      | Certificate authority for acme.sh, default `letsencrypt`.    |
 | `CF_Token`           | *(passthrough)*| DNS provider credentials, consumed directly by `acme.sh`.    |
 | `TS_AUTHKEY`         | —              | Optional. Tailscale auth key; connects the container to your tailnet (see below). |
 | `TS_HOSTNAME`        | —              | Tailscale node name, default `hpilo-cert`.        |

@@ -31,6 +31,10 @@ services:
       # DNS provider for acme.sh (see https://github.com/acmesh-official/acme.sh/wiki/dnsapi)
       ILO_DNSAPI: "dns_cf"
 
+      # Certificate authority for acme.sh: letsencrypt (default), zerossl,
+      # buypass, google... See https://github.com/acmesh-official/acme.sh/wiki/Server
+      ILO_ACME_CA: "letsencrypt"
+
       # Cloudflare API credentials for dns_cf (scoped Zone:DNS:Edit token)
       CF_Token: "your-cloudflare-api-token"
       # A token with Zone:DNS:Edit on the zone is sufficient; CF_Account_ID is
