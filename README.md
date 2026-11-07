@@ -53,5 +53,35 @@ When a certificate is first issued, `CF_Token` and `CF_Account_ID` are saved in 
 
 To list all issued certificates `acme.sh --list`. Acme.sh will manage the renewal and deployment of the certificates.
 
+A Docker image is provided for running the script without installing anything locally. On start the container issues the certificate if one is not already present, then keeps running a daily `acme.sh --cron` job so certificates renew (acme.sh decides when based on each certificate's actual expiry, default 60 days before it) and redeploys automatically.
+
+```bash
+docker build -t hpilo-le .
+docker compose up -d   # after editing docker-compose.yml
+```
+
+All configuration is passed via environment variables:
+
+| Environment variable | Maps to        | Notes                                                        |
+| -------------------- | -------------- | ------------------------------------------------------------ |
+| `ILO_USERNAME`       | `USERNAME`     | Required. iLO administrator username.                        |
+| `ILO_PASSWORD`       | `PASSWORD`     | Required. iLO administrator password.                        |
+| `ILO_HOSTNAME`       | `HOSTNAME`     | Required. iLO hostname.                                      |
+| `ILO_DOMAIN`         | `DOMAIN`       | Required. Registered domain name.                            |
+| `ILO_STAGING`        | `STAGING`      | `0` (default) or `1` for Let's Encrypt staging.              |
+| `ILO_DNSAPI`         | `DNSAPI`       | acme.sh DNS provider, default `dns_cf` (Cloudflare).         |
+| `ILO_RUN_ONCE`       | —              | Set to `1` to exit after initial issuance (no renewal cron). |
+| `CF_Token`           | *(passthrough)*| DNS provider credentials, consumed directly by `acme.sh`.    |
+
+DNS provider credentials (e.g. `CF_Token`, `CF_Account_ID` for Cloudflare) are passed straight through to `acme.sh` and saved in `$ACMESH_DIR/account.conf` on first issuance, so renewals keep working after a restart. Persist `./acme` (acme.sh home) and `./data` (CSRs, per-host configs, deploy scripts) as shown in `docker-compose.yml`.
+
+For a one-shot run instead of a long-lived renewal container:
+
+```bash
+docker compose run --rm -e ILO_RUN_ONCE=1 hpilo
+```
+
+Multi-architecture images (`linux/amd64` and `linux/arm64`) are built and published to this repository's container registry (`ghcr.io/<owner>/<repo>`) by GitHub Actions on every push to `main`.
+
 ## How It Works
 `hpilo.sh` ordinarily only needs to be run once per iLO host.  When you run it, it will generate a host-specific config file (`$FQDN.conf`), connect to the host so that it can generate a certificate signing request (`$FQDN.csr`), generate a host-specific deployment script (`$FQDN.sh`), and then have `acme.sh` obtain a certificate based on that CSR, using the generated script to deploy the cert to the iLO host.  Once that's done, `acme.sh` will handle renewing the cert, and deploying the renewed cert, on its own with no further need of `hpilo.sh`.

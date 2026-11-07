@@ -1,0 +1,40 @@
+# Example docker compose for hpilo.sh.
+#
+# The container performs the initial issuance on start, then stays running
+# so acme.sh can renew and redeploy the certificate to your iLO on schedule.
+#
+# Persistent state lives in two volumes:
+#   ./acme : acme.sh home (account.conf, certs) — must survive restarts
+#   ./data : generated CSRs, per-host configs and deploy scripts
+#
+# For a one-shot run instead of a long-lived renewal container:
+#   docker compose run --rm -e ILO_RUN_ONCE=1 hpilo
+services:
+  hpilo:
+    image: ghcr.io/arthurhpilo/hpilo.sh:latest  # adjust to your GitHub repo
+    container_name: hpilo-le
+    restart: unless-stopped
+    environment:
+      # iLO credentials and FQDN (FQDN = ILO_HOSTNAME.ILO_DOMAIN)
+      ILO_USERNAME: "Administrator"
+      ILO_PASSWORD: "changeme"
+      ILO_HOSTNAME: "ilo"
+      ILO_DOMAIN: "mydomain.com"
+
+      # Set to 1 while testing to use the Let's Encrypt staging servers
+      ILO_STAGING: "1"
+
+      # DNS provider for acme.sh (see https://github.com/acmesh-official/acme.sh/wiki/dnsapi)
+      ILO_DNSAPI: "dns_cf"
+
+      # Cloudflare API credentials for dns_cf (scoped Zone:DNS:Edit token)
+      CF_Token: "your-cloudflare-api-token"
+      CF_Account_ID: "your-cloudflare-account-id"
+
+      # Optional
+      # ILO_RUN_ONCE: "1"        # exit after initial issuance, no renewal daemon
+      # CRON_SCHEDULE: "17 0 * * *"
+      # TZ: "America/New_York"
+    volumes:
+      - ./acme:/acme.sh
+      - ./data:/data
