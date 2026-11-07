@@ -1,0 +1,16 @@
+#!/opt/venv/bin/python3
+# Wrapper for hpilo_cli: when the container runs with Tailscale userspace
+# networking (ILO_TAILSCALE=1), all sockets are routed through the local
+# tailscaled SOCKS5 proxy so iLO connections obey tailnet ACLs.
+import os
+import runpy
+
+if os.environ.get("ILO_TAILSCALE") == "1":
+    import socket
+
+    import socks
+
+    socks.set_default_proxy(socks.SOCKS5, "127.0.0.1", 1055, rdns=True)
+    socket.socket = socks.socksocket
+
+runpy.run_path("/opt/venv/bin/hpilo_cli", run_name="__main__")

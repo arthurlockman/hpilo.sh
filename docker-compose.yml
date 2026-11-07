@@ -3,9 +3,10 @@
 # The container performs the initial issuance on start, then stays running
 # so acme.sh can renew and redeploy the certificate to your iLO on schedule.
 #
-# Persistent state lives in two volumes:
-#   ./acme : acme.sh home (account.conf, certs) — must survive restarts
-#   ./data : generated CSRs, per-host configs and deploy scripts
+# Persistent state lives in three volumes:
+#   ./acme      : acme.sh home (account.conf, certs) — must survive restarts
+#   ./data      : generated CSRs, per-host configs and deploy scripts
+#   ./tailscale : tailscaled state, only used when TS_AUTHKEY is set
 #
 # For a one-shot run instead of a long-lived renewal container:
 #   docker compose run --rm -e ILO_RUN_ONCE=1 hpilo
@@ -29,7 +30,18 @@ services:
 
       # Cloudflare API credentials for dns_cf (scoped Zone:DNS:Edit token)
       CF_Token: "your-cloudflare-api-token"
-      CF_Account_ID: "your-cloudflare-account-id"
+      # A token with Zone:DNS:Edit on the zone is sufficient; CF_Account_ID is
+      # optional (only needed to narrow the zone lookup with broad tokens) and
+      # CF_Zone_ID skips the lookup entirely.
+      # CF_Zone_ID: "your-cloudflare-zone-id"
+
+      # Optional: connect to Tailscale to reach ACL-governed iLOs on your tailnet.
+      # Create a reusable auth key tagged e.g. tag:hpilo-certs, grant that tag ACL
+      # access to the iLO's tailscale IP, and persist ./tailscale so the node
+      # identity survives restarts.
+      # TS_AUTHKEY: "tskey-auth-..."
+      # TS_HOSTNAME: "hpilo-cert"
+
 
       # Optional
       # ILO_RUN_ONCE: "1"        # exit after initial issuance, no renewal daemon
@@ -38,3 +50,4 @@ services:
     volumes:
       - ./acme:/acme.sh
       - ./data:/data
+      - ./tailscale:/var/lib/tailscale

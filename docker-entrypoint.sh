@@ -23,6 +23,26 @@ if [ ! -x "${ACMESH_DIR}/acme.sh" ]; then
   cp -a /opt/acme-sh-src/. "${ACMESH_DIR}/"
 fi
 
+# Optional Tailscale: connect the container to the tailnet so it can reach
+# iLO hosts governed by tailnet ACLs. Uses userspace networking (no TUN
+# device), with a local SOCKS5 proxy that hpilo_cli and curl are routed
+# through via ILO_TAILSCALE / ALL_PROXY.
+TS_ENV=""
+if [ -n "${TS_AUTHKEY:-}" ]; then
+  TS_STATE_DIR="${TS_STATE_DIR:-/var/lib/tailscale}"
+  mkdir -p "${TS_STATE_DIR}"
+  echo "Starting tailscaled (userspace networking)..."
+  tailscaled --tun=userspace-networking --socks5-server=127.0.0.1:1055 \
+    --statedir="${TS_STATE_DIR}" >/var/log/tailscaled.log 2>&1 &
+  if ! tailscale up --authkey="${TS_AUTHKEY}" --hostname="${TS_HOSTNAME:-hpilo-cert}" ${TS_EXTRA_ARGS:-}; then
+    print_err "tailscale up failed (invalid auth key, or ACL/CLI error). See /var/log/tailscaled.log"
+    exit 1
+  fi
+  export ILO_TAILSCALE=1
+  export ALL_PROXY=socks5h://127.0.0.1:1055
+  TS_ENV=" ILO_TAILSCALE=1 ALL_PROXY=socks5h://127.0.0.1:1055"
+fi
+
 STAGING="${ILO_STAGING:-0}"
 case "${STAGING}" in 0|1) ;; *) print_err "ILO_STAGING must be 0 or 1"; exit 1;; esac
 
@@ -55,7 +75,7 @@ fi
 
 # Keep the container alive and let acme.sh renew + redeploy on schedule.
 # ACMESH_DIR is exported because the generated deploy script references it.
-echo "${CRON_SCHEDULE} export ACMESH_DIR='${ACMESH_DIR}'; '${ACMESH_DIR}/acme.sh' --cron --home '${ACMESH_DIR}' >/dev/null 2>&1" \
+echo "${CRON_SCHEDULE} export ACMESH_DIR='${ACMESH_DIR}'${TS_ENV}; '${ACMESH_DIR}/acme.sh' --cron --home '${ACMESH_DIR}' >/dev/null 2>&1" \
   > /etc/crontabs/root
 echo "Initial issuance complete; renewal cron '${CRON_SCHEDULE}' is running."
 exec crond -f -l 8

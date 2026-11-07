@@ -44,9 +44,10 @@ Other options with defaults include:
 3. If this is your first deployment, set up the API credentials for your DNS provider https://github.com/acmesh-official/acme.sh/wiki/dnsapi, but do not issue a certificate just yet! For example, for Cloudflare:
 ```
 export CF_Token="sdfsdfsdfljlbjkljlkjsdfoiwje"
-export CF_Account_ID="xxxxxxxxxxxxx"
-```
-When a certificate is first issued, `CF_Token` and `CF_Account_ID` are saved in `$ACMESH_DIR/account.conf` and used for subsequent deployments.
+export CF_Account_ID="xxxxxxxxxxxxx"   # optional; see acme.sh dns_cf docs
+
+Only `CF_Token` is required for a zone-scoped token; `CF_Account_ID` optionally narrows the zone lookup for broad tokens.
+When a certificate is first issued, the credentials you set are saved in `$ACMESH_DIR/account.conf` and used for subsequent deployments.
 
 4. Run the helper script `bash hpilo.sh` to issue and deploy a Let's Encrypt certificate to the iLO. 
 5. Repeat the above steps for other iLOs on your network.
@@ -72,6 +73,8 @@ All configuration is passed via environment variables:
 | `ILO_DNSAPI`         | `DNSAPI`       | acme.sh DNS provider, default `dns_cf` (Cloudflare).         |
 | `ILO_RUN_ONCE`       | —              | Set to `1` to exit after initial issuance (no renewal cron). |
 | `CF_Token`           | *(passthrough)*| DNS provider credentials, consumed directly by `acme.sh`.    |
+| `TS_AUTHKEY`         | —              | Optional. Tailscale auth key; connects the container to your tailnet (see below). |
+| `TS_HOSTNAME`        | —              | Tailscale node name, default `hpilo-cert`.        |
 
 DNS provider credentials (e.g. `CF_Token`, `CF_Account_ID` for Cloudflare) are passed straight through to `acme.sh` and saved in `$ACMESH_DIR/account.conf` on first issuance, so renewals keep working after a restart. Persist `./acme` (acme.sh home) and `./data` (CSRs, per-host configs, deploy scripts) as shown in `docker-compose.yml`.
 
@@ -80,6 +83,16 @@ For a one-shot run instead of a long-lived renewal container:
 ```bash
 docker compose run --rm -e ILO_RUN_ONCE=1 hpilo
 ```
+
+### Tailscale
+
+If your iLOs are only reachable over your tailnet (e.g. behind Tailscale ACLs), set `TS_AUTHKEY` to a reusable auth key from the Tailscale admin console. The container runs `tailscaled` in userspace-networking mode (no TUN device needed, works in Apple's container runtime) and routes all iLO traffic through it:
+
+* `hpilo_cli` connections are proxied through the local Tailscale SOCKS5 endpoint (`127.0.0.1:1055`), so tailnet ACLs apply to the container's node identity.
+* Create the key with a tag such as `tag:hpilo-certs` and grant that tag access to the iLO nodes in your ACL policy.
+* Persist `./tailscale:/var/lib/tailscale` (as in `docker-compose.yml`) so the node keeps its identity and ACL grants across restarts.
+* Name resolution for the iLO FQDN happens through Tailscale's DNS, so add a split-DNS entry or hosts override in the Tailscale admin console pointing your iLO FQDN at the iLO's tailnet IP.
+* Do not attach an exit node to this container's node — all HTTP traffic (including Cloudflare API calls) flows through the tailscale SOCKS proxy when enabled.
 
 Multi-architecture images (`linux/amd64` and `linux/arm64`) are built and published to this repository's container registry (`ghcr.io/<owner>/<repo>`) by GitHub Actions on every push to `main`.
 
