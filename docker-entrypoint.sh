@@ -62,6 +62,7 @@ HOSTNAME="${ILO_HOSTNAME}"
 DOMAIN="${ILO_DOMAIN}"
 STAGING=${STAGING}
 DNSAPI="${ILO_DNSAPI:-dns_cf}"
+CERT_DOMAIN="${ILO_CERT_DOMAIN:-}"
 ACMESH_DIR="${ACMESH_DIR}"
 SCRIPT_BASEDIR="${SCRIPT_BASEDIR}"
 EOF
@@ -69,7 +70,7 @@ chmod 600 "${APP}/hpilo.cfg"
 
 mkdir -p "${SCRIPT_BASEDIR}"
 
-FQDN="${ILO_HOSTNAME}.${ILO_DOMAIN}"
+FQDN="${ILO_HOSTNAME}.${ILO_CERT_DOMAIN:-${ILO_DOMAIN}}"
 if [ -s "${ACMESH_DIR}/${FQDN}/${FQDN}.cer" ] \
    && openssl x509 -in "${ACMESH_DIR}/${FQDN}/${FQDN}.cer" -noout -checkend "$((45 * 86400))" 2>/dev/null; then
   echo "Valid certificate for ${FQDN} already present (renews via acme.sh); skipping initial issuance."

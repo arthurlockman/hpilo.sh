@@ -18,6 +18,7 @@ print_msg "General configuration..."
 # Initialize defaults
 HOSTNAME=""
 DOMAIN=""
+CERT_DOMAIN=""
 USERNAME=""
 PASSWORD=""
 STAGING=0
@@ -43,6 +44,11 @@ chmod 600 "${SCRIPTPATH}"/"${CONFIG_NAME}"
 #####################################################################
 print_msg "Input/Config Sanity checks..."
 
+# CERT_DOMAIN overrides the domain used for the certificate (CSR, DNS
+# validation and file naming) when the iLO's own domain differs — e.g. when
+# it is supplied by DHCP and cannot be changed. Defaults to DOMAIN.
+CERT_DOMAIN="${CERT_DOMAIN:-${DOMAIN}}"
+
 # Check that necessary variables were set by hpilo.cfg
 if [ -z "${HOSTNAME}" ]; then
   print_err 'Configuration error: HOSTNAME must be set'
@@ -64,7 +70,7 @@ fi
 #####################################################################
 print_msg "DNS resolver check..."
 
-FQDN="${HOSTNAME}.${DOMAIN}"
+FQDN="${HOSTNAME}.${CERT_DOMAIN}"
 
 # Check for DNS resolution
 curl https://${FQDN}
@@ -108,8 +114,12 @@ if [ ${CHOSTNAME} != ${HOSTNAME} ]; then
 fi
 
 # Check for DOMAIN mismatch
+# The iLO's own domain may be DHCP-assigned and differ from the certificate
+# domain; only enforce the match when no CERT_DOMAIN override is in play.
 CDOMAIN=$(hpilo_cli -c ${CFG} ${FQDN} get_network_settings | grep "'domain_name'" | cut -d "'" -f 4)
-if [ ${CDOMAIN} != ${DOMAIN} ]; then
+if [ "${CERT_DOMAIN}" != "${DOMAIN}" ]; then
+  print_msg "Skipping DOMAIN check: CERT_DOMAIN (${CERT_DOMAIN}) intentionally differs from iLO domain (${CDOMAIN})."
+elif [ ${CDOMAIN} != ${DOMAIN} ]; then
   print_err "DOMAIN mismatch between ${CONFIG_NAME} (${DOMAIN}) and iLO (${CDOMAIN}). Remedy before continuing."
   exit 1
 fi

@@ -21,6 +21,9 @@ services:
       ILO_PASSWORD: "changeme"
       ILO_HOSTNAME: "ilo"
       ILO_DOMAIN: "mydomain.com"
+      # Optional: certificate-name domain when the iLO's own domain (e.g.
+      # DHCP-assigned) differs from the name you want on the certificate.
+      # ILO_CERT_DOMAIN: "cert-domain.example.com"
 
       # Set to 1 while testing to use the Let's Encrypt staging servers
       ILO_STAGING: "1"
