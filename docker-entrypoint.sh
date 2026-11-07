@@ -34,9 +34,16 @@ if [ -n "${TS_AUTHKEY:-}" ]; then
   echo "Starting tailscaled (userspace networking)..."
   tailscaled --tun=userspace-networking --socks5-server=127.0.0.1:1055 \
     --statedir="${TS_STATE_DIR}" >/var/log/tailscaled.log 2>&1 &
-  if ! tailscale up --authkey="${TS_AUTHKEY}" --hostname="${TS_HOSTNAME:-hpilo-cert}" ${TS_EXTRA_ARGS:-}; then
-    print_err "tailscale up failed (invalid auth key, or ACL/CLI error). See /var/log/tailscaled.log"
-    exit 1
+  # Auth keys expire (max 90 days), but a tagged node's key never does.
+  # Only authenticate when this container isn't already logged in, so an
+  # expired key never blocks restarts of a healthy node.
+  if ! tailscale status >/dev/null 2>&1; then
+    if ! tailscale up --authkey="${TS_AUTHKEY}" --hostname="${TS_HOSTNAME:-hpilo-cert}" ${TS_EXTRA_ARGS:-}; then
+      print_err "tailscale up failed (invalid auth key, or ACL/CLI error). See /var/log/tailscaled.log"
+      exit 1
+    fi
+  else
+    tailscale up --hostname="${TS_HOSTNAME:-hpilo-cert}" >/dev/null
   fi
   export ILO_TAILSCALE=1
   export ALL_PROXY=socks5h://127.0.0.1:1055

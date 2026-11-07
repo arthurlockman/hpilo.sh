@@ -91,6 +91,7 @@ If your iLOs are only reachable over your tailnet (e.g. behind Tailscale ACLs), 
 * `hpilo_cli` connections are proxied through the local Tailscale SOCKS5 endpoint (`127.0.0.1:1055`), so tailnet ACLs apply to the container's node identity.
 * Create the key with a tag such as `tag:hpilo-certs` and grant that tag access to the iLO nodes in your ACL policy.
 * Persist `./tailscale:/var/lib/tailscale` (as in `docker-compose.yml`) so the node keeps its identity and ACL grants across restarts.
+* The auth key is only used on first login (or after wiping `./tailscale`). Tagged nodes have no node key expiry, so restarts never re-authenticate and an expired auth key can't block a healthy container.
 * Name resolution for the iLO FQDN happens through Tailscale's DNS, so add a split-DNS entry or hosts override in the Tailscale admin console pointing your iLO FQDN at the iLO's tailnet IP.
 * Do not attach an exit node to this container's node — all HTTP traffic (including Cloudflare API calls) flows through the tailscale SOCKS proxy when enabled.
 
