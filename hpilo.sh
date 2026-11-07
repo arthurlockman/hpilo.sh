@@ -154,7 +154,7 @@ chmod +x ${SCRIPT}
 #####################################################################
 print_msg "Generating and importing the certificate..."
 if [ ${STAGING} -eq 0 ]; then
-  ${ACMESH_DIR}/acme.sh --signcsr --csr ${CSR} --dns ${DNSAPI} --server ${ACME_CA} --reloadcmd ${SCRIPT} --force
+  ${ACMESH_DIR}/acme.sh --signcsr --home ${ACMESH_DIR} --csr ${CSR} --dns ${DNSAPI} --server ${ACME_CA} --reloadcmd ${SCRIPT} --force
 else
-  ${ACMESH_DIR}/acme.sh --signcsr --csr ${CSR} --dns ${DNSAPI} --days 1 --staging --server ${ACME_CA} --reloadcmd ${SCRIPT} --force
+  ${ACMESH_DIR}/acme.sh --signcsr --home ${ACMESH_DIR} --csr ${CSR} --dns ${DNSAPI} --days 1 --staging --server ${ACME_CA} --reloadcmd ${SCRIPT} --force
 fi
