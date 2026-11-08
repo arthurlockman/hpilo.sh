@@ -31,11 +31,13 @@ services:
     environment:
       # Reusable auth key, tagged (e.g. tag:hpilo-certs); ACLs grant that tag
       # access to the BMC nodes. Only needed on first join; state persists.
-      TS_AUTHKEY: "tskey-auth-..."
+      # userspace networking would leave the shared netns without tailnet
+      # routing; TUN mode (NET_ADMIN + /dev/net/tun below) is required.
+      TS_USERSPACE: "false"
       TS_STATE_DIR: /var/lib/tailscale
       TS_HOSTNAME: certbot
-      # accept-routes: reach subnet-routed BMCs; accept-dns: MagicDNS/split DNS
-      TS_EXTRA_ARGS: "--accept-dns=true --accept-routes"
+      # accept-routes: reach subnet-routed BMCs
+      TS_EXTRA_ARGS: "--accept-routes"
     cap_add:
       - NET_ADMIN
     devices:
