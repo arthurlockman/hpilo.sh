@@ -1,60 +1,120 @@
-# Example docker compose for hpilo.sh.
+# Unified certificate automation for BMCs behind Tailscale.
 #
-# The container performs the initial issuance on start, then stays running
-# so acme.sh can renew and redeploy the certificate to your iLO on schedule.
+#   tailscale     : one sidecar with a real TUN device; every cert service
+#                   shares its network namespace, so BMC FQDNs resolve via
+#                   Tailscale DNS and all BMC traffic obeys your tailnet ACLs.
+#   hpilo         : HPE iLO issuance + resident renewal cron (acme.sh).
+#   supermicro-a/b: Supermicro issuance via lego + cert upload over the BMC
+#                   web UI; runs a check every RUN_INTERVAL seconds and only
+#                   renews when the installed cert is LE and expiring <30d.
 #
-# Persistent state lives in three volumes:
-#   ./acme      : acme.sh home (account.conf, certs) — must survive restarts
-#   ./data      : generated CSRs, per-host configs and deploy scripts
-#   ./tailscale : tailscaled state, only used when TS_AUTHKEY is set
-#
-# For a one-shot run instead of a long-lived renewal container:
-#   docker compose run --rm -e ILO_RUN_ONCE=1 hpilo
+# Notes:
+#   * The BMC cert names need DNS overrides in the Tailscale admin console
+#     (or approved subnet routes) so the shared netns can resolve them.
+#   * Supermicro uploads reboot the BMC to apply the certificate; HPE iLO
+#     imports without a reboot.
+#   * On the Mac (Apple container runtime) use docker-compose.apple.yml,
+#     which runs tailscaled inside the hpilo container instead.
+
+x-dns-creds: &dns-creds
+  # One Cloudflare token with Zone:DNS:Edit serves both acme.sh (dns_cf) and
+  # lego (cloudflare provider).
+  CF_Token: "your-cloudflare-api-token"
+  CLOUDFLARE_DNS_API_TOKEN: "your-cloudflare-api-token"
+
 services:
-  hpilo:
-    image: ghcr.io/arthurhpilo/hpilo.sh:latest  # adjust to your GitHub repo
-    container_name: hpilo-le
+  tailscale:
+    image: tailscale/tailscale:stable
+    container_name: certs-tailscale
+    hostname: certbot
     restart: unless-stopped
     environment:
-      # iLO credentials and FQDN (FQDN = ILO_HOSTNAME.ILO_DOMAIN)
+      # Reusable auth key, tagged (e.g. tag:hpilo-certs); ACLs grant that tag
+      # access to the BMC nodes. Only needed on first join; state persists.
+      TS_AUTHKEY: "tskey-auth-..."
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_HOSTNAME: certbot
+      # accept-routes: reach subnet-routed BMCs; accept-dns: MagicDNS/split DNS
+      TS_EXTRA_ARGS: "--accept-dns=true --accept-routes"
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - ./tailscale:/var/lib/tailscale
+    healthcheck:
+      test: ["CMD", "tailscale", "status", "--peers=false"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  hpilo:
+    image: ghcr.io/arthurlockman/hpilo.sh:master
+    container_name: hpilo-le
+    restart: unless-stopped
+    network_mode: "service:tailscale"
+    depends_on:
+      tailscale:
+        condition: service_healthy
+    environment:
+      <<: *dns-creds
+      # iLO credentials and certificate name
       ILO_USERNAME: "Administrator"
       ILO_PASSWORD: "changeme"
-      ILO_HOSTNAME: "ilo"
-      ILO_DOMAIN: "mydomain.com"
-      # Optional: certificate-name domain when the iLO's own domain (e.g.
-      # DHCP-assigned) differs from the name you want on the certificate.
-      # ILO_CERT_DOMAIN: "cert-domain.example.com"
-
-      # Set to 1 while testing to use the Let's Encrypt staging servers
-      ILO_STAGING: "1"
-
-      # DNS provider for acme.sh (see https://github.com/acmesh-official/acme.sh/wiki/dnsapi)
+      ILO_HOSTNAME: "grand-central"
+      # what the iLO itself reports (DHCP-supplied) vs the cert name
+      ILO_DOMAIN: "mgmt.rosafamily.us"
+      ILO_CERT_DOMAIN: "ipmi.rosafamily.us"
+      ILO_STAGING: "1" # flip to 0 after the first successful deployment
       ILO_DNSAPI: "dns_cf"
-
-      # Certificate authority for acme.sh: letsencrypt (default), zerossl,
-      # buypass, google... See https://github.com/acmesh-official/acme.sh/wiki/Server
       ILO_ACME_CA: "letsencrypt"
-
-      # Cloudflare API credentials for dns_cf (scoped Zone:DNS:Edit token)
-      CF_Token: "your-cloudflare-api-token"
-      # A token with Zone:DNS:Edit on the zone is sufficient; CF_Account_ID is
-      # optional (only needed to narrow the zone lookup with broad tokens) and
-      # CF_Zone_ID skips the lookup entirely.
-      # CF_Zone_ID: "your-cloudflare-zone-id"
-
-      # Optional: connect to Tailscale to reach ACL-governed iLOs on your tailnet.
-      # Create a reusable auth key tagged e.g. tag:hpilo-certs, grant that tag ACL
-      # access to the iLO's tailscale IP, and persist ./tailscale so the node
-      # identity survives restarts.
-      # TS_AUTHKEY: "tskey-auth-..."
-      # TS_HOSTNAME: "hpilo-cert"
-
-
-      # Optional
-      # ILO_RUN_ONCE: "1"        # exit after initial issuance, no renewal daemon
-      # CRON_SCHEDULE: "17 0 * * *"
-      # TZ: "America/New_York"
     volumes:
       - ./acme:/acme.sh
       - ./data:/data
-      - ./tailscale:/var/lib/tailscale
+
+  supermicro-a:
+    image: ghcr.io/marthydavid/supermicro-letsencrypt:latest
+    container_name: supermicro-a-le
+    restart: unless-stopped
+    network_mode: "service:tailscale"
+    depends_on:
+      tailscale:
+        condition: service_healthy
+    environment:
+      <<: *dns-creds
+      IPMI_USERNAME: "ADMIN"
+      IPMI_PASSWORD: "changeme"
+      IPMI_DOMAIN: "sup-a.ipmi.rosafamily.us"
+      LE_EMAIL: "you@example.com"
+      DNS_PROVIDER: "cloudflare"
+      # Board generation: X9, X10, X11, X12 (X13 uses X12). Check the BMC.
+      MODEL: "X11"
+    # Upstream image is a one-shot (built for cronjobs); loop it instead.
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - 'while true; do /home/lego/le-supermicro-ipmi.sh; echo "next check in ${RUN_INTERVAL:-21600}s"; sleep "${RUN_INTERVAL:-21600}"; done'
+    volumes:
+      - ./lego-a:/home/lego/.lego
+
+  supermicro-b:
+    image: ghcr.io/marthydavid/supermicro-letsencrypt:latest
+    container_name: supermicro-b-le
+    restart: unless-stopped
+    network_mode: "service:tailscale"
+    depends_on:
+      tailscale:
+        condition: service_healthy
+    environment:
+      <<: *dns-creds
+      IPMI_USERNAME: "ADMIN"
+      IPMI_PASSWORD: "changeme"
+      IPMI_DOMAIN: "sup-b.ipmi.rosafamily.us"
+      LE_EMAIL: "you@example.com"
+      DNS_PROVIDER: "cloudflare"
+      MODEL: "X11"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - 'while true; do /home/lego/le-supermicro-ipmi.sh; echo "next check in ${RUN_INTERVAL:-21600}s"; sleep "${RUN_INTERVAL:-21600}"; done'
+    volumes:
+      - ./lego-b:/home/lego/.lego

@@ -54,46 +54,54 @@ When a certificate is first issued, the credentials you set are saved in `$ACMES
 
 To list all issued certificates `acme.sh --list`. Acme.sh will manage the renewal and deployment of the certificates.
 
+## Docker
+
 A Docker image is provided for running the script without installing anything locally. On start the container issues the certificate if one is not already present, then keeps running a daily `acme.sh --cron` job so certificates renew (acme.sh decides when based on each certificate's actual expiry, default 60 days before it) and redeploys automatically.
 
+`docker-compose.yml` is a full stack for a Linux docker host: one Tailscale sidecar (real TUN device) shared by network namespace with the certificate services, the HPE iLO container, and two [supermicro-letsencrypt](https://github.com/marthydavid/supermicro-letsencrypt) containers for Supermicro BMCs:
+
 ```bash
-docker build -t hpilo-le .
 docker compose up -d   # after editing docker-compose.yml
 ```
 
-All configuration is passed via environment variables:
+* All services reach the BMCs through the tailnet, so ACLs apply to the sidecar's node identity (auth key tagged e.g. `tag:hpilo-certs`). The auth key is only used on first join — tagged nodes never expire, and persisted `./tailscale` state survives restarts.
+* BMC FQDNs resolve through Tailscale's DNS; add split-DNS overrides or approve subnet routes in the Tailscale admin console for each cert name.
+* `docker-compose.apple.yml` is the single-container variant for the Mac's Apple container runtime (userspace tailscaled inside the hpilo container, SOCKS5-proxied iLO traffic), since that runtime supports neither shared network namespaces nor TUN devices.
+
+HPE iLO configuration (environment variables on the `hpilo` service):
 
 | Environment variable | Maps to        | Notes                                                        |
 | -------------------- | -------------- | ------------------------------------------------------------ |
 | `ILO_USERNAME`       | `USERNAME`     | Required. iLO administrator username.                        |
 | `ILO_PASSWORD`       | `PASSWORD`     | Required. iLO administrator password.                        |
 | `ILO_HOSTNAME`       | `HOSTNAME`     | Required. iLO hostname.                                      |
-| `ILO_DOMAIN`         | `DOMAIN`       | Required. Registered domain name.                            |
+| `ILO_DOMAIN`         | `DOMAIN`       | Required. The domain the iLO itself reports (may be DHCP-assigned). |
+| `ILO_CERT_DOMAIN`    | `CERT_DOMAIN`  | Optional. Domain for the certificate when it differs from `ILO_DOMAIN`. |
 | `ILO_STAGING`        | `STAGING`      | `0` (default) or `1` for Let's Encrypt staging.              |
 | `ILO_DNSAPI`         | `DNSAPI`       | acme.sh DNS provider, default `dns_cf` (Cloudflare).         |
-| `ILO_ACME_CA`       | `ACME_CA`      | Certificate authority for acme.sh, default `letsencrypt`.    |
+| `ILO_ACME_CA`        | `ACME_CA`      | Certificate authority for acme.sh, default `letsencrypt`.    |
+| `ILO_RUN_ONCE`       | —              | Set to `1` to exit after initial issuance (no renewal cron). |
 | `CF_Token`           | *(passthrough)*| DNS provider credentials, consumed directly by `acme.sh`.    |
-| `TS_AUTHKEY`         | —              | Optional. Tailscale auth key; connects the container to your tailnet (see below). |
-| `TS_HOSTNAME`        | —              | Tailscale node name, default `hpilo-cert`.        |
+| `TS_AUTHKEY`         | —              | Standalone (Apple) mode only: Tailscale auth key for in-container userspace networking. |
+| `TS_HOSTNAME`        | —              | Standalone (Apple) mode only: Tailscale node name, default `hpilo-cert`. |
 
-DNS provider credentials (e.g. `CF_Token`, `CF_Account_ID` for Cloudflare) are passed straight through to `acme.sh` and saved in `$ACMESH_DIR/account.conf` on first issuance, so renewals keep working after a restart. Persist `./acme` (acme.sh home) and `./data` (CSRs, per-host configs, deploy scripts) as shown in `docker-compose.yml`.
+DNS provider credentials (e.g. `CF_Token` for Cloudflare) are passed straight through to `acme.sh` and saved in `$ACMESH_DIR/account.conf` on first issuance, so renewals keep working after a restart. Persist `./acme` (acme.sh home) and `./data` (CSRs, per-host configs, deploy scripts).
 
-For a one-shot run instead of a long-lived renewal container:
+### Supermicro
 
-```bash
-docker compose run --rm -e ILO_RUN_ONCE=1 hpilo
-```
+The `supermicro-a` / `supermicro-b` services run [marthydavid/supermicro-letsencrypt](https://github.com/marthydavid/supermicro-letsencrypt) in a loop: each cycle checks the certificate installed on the BMC via HTTPS — if it is Let's Encrypt-issued and valid for more than 30 days it exits, otherwise it obtains a new certificate with [lego](https://github.com/go-acme/lego) (DNS-01, `DNS_PROVIDER: cloudflare` using `CLOUDFLARE_DNS_API_TOKEN`), uploads cert and key over the BMC's web interface, and reboots the BMC to apply it.
 
-### Tailscale
+Per-server settings:
 
-If your iLOs are only reachable over your tailnet (e.g. behind Tailscale ACLs), set `TS_AUTHKEY` to a reusable auth key from the Tailscale admin console. The container runs `tailscaled` in userspace-networking mode (no TUN device needed, works in Apple's container runtime) and routes all iLO traffic through it:
+| Environment variable | Notes                                                                   |
+| -------------------- | ----------------------------------------------------------------------- |
+| `IPMI_USERNAME` / `IPMI_PASSWORD` | Supermicro admin account.                                   |
+| `IPMI_DOMAIN`        | Full FQDN of the BMC — also the name on the certificate.                |
+| `LE_EMAIL`           | Account email for Let's Encrypt registration.                           |
+| `MODEL`              | Board generation: `X9`, `X10`, `X11`, `X12` (`X13` uses `X12`).          |
+| `RUN_INTERVAL`       | Seconds between checks (compose default 21600 = 6h).                    |
 
-* `hpilo_cli` connections are proxied through the local Tailscale SOCKS5 endpoint (`127.0.0.1:1055`), so tailnet ACLs apply to the container's node identity.
-* Create the key with a tag such as `tag:hpilo-certs` and grant that tag access to the iLO nodes in your ACL policy.
-* Persist `./tailscale:/var/lib/tailscale` (as in `docker-compose.yml`) so the node keeps its identity and ACL grants across restarts.
-* The auth key is only used on first login (or after wiping `./tailscale`). Tagged nodes have no node key expiry, so restarts never re-authenticate and an expired auth key can't block a healthy container.
-* Name resolution for the iLO FQDN happens through Tailscale's DNS, so add a split-DNS entry or hosts override in the Tailscale admin console pointing your iLO FQDN at the iLO's tailnet IP.
-* Do not attach an exit node to this container's node — all HTTP traffic (including Cloudflare API calls) flows through the tailscale SOCKS proxy when enabled.
+Each service keeps lego state in its own volume (`./lego-a`, `./lego-b`) so renewals reuse the same ACME account and key.
 
 Multi-architecture images (`linux/amd64` and `linux/arm64`) are built and published to this repository's container registry (`ghcr.io/<owner>/<repo>`) by GitHub Actions on every push to `main`.
 

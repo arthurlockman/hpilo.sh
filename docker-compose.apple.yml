@@ -1,0 +1,54 @@
+# Single-container variant for the Mac (Apple container runtime), which
+# supports neither shared network namespaces nor /dev/net/tun. tailscaled
+# therefore runs INSIDE the hpilo container in userspace-networking mode,
+# with iLO traffic proxied through its local SOCKS5 endpoint.
+#
+# On the Linux docker host use docker-compose.yml (tailscale sidecar) instead.
+
+services:
+  hpilo:
+    image: ghcr.io/arthurlockman/hpilo.sh:master  # adjust to your GitHub repo
+    container_name: hpilo-le
+    restart: unless-stopped
+    environment:
+      # iLO credentials and FQDN (FQDN = ILO_HOSTNAME.ILO_DOMAIN)
+      ILO_USERNAME: "Administrator"
+      ILO_PASSWORD: "changeme"
+      ILO_HOSTNAME: "ilo"
+      ILO_DOMAIN: "mydomain.com"
+      # Optional: certificate-name domain when the iLO's own domain (e.g.
+      # DHCP-assigned) differs from the name you want on the certificate.
+      # ILO_CERT_DOMAIN: "cert-domain.example.com"
+
+      # Set to 1 while testing to use the Let's Encrypt staging servers
+      ILO_STAGING: "1"
+
+      # DNS provider for acme.sh (see https://github.com/acmesh-official/acme.sh/wiki/dnsapi)
+      ILO_DNSAPI: "dns_cf"
+
+      # Certificate authority for acme.sh: letsencrypt (default), zerossl,
+      # buypass, google... See https://github.com/acmesh-official/acme.sh/wiki/Server
+      ILO_ACME_CA: "letsencrypt"
+
+      # Cloudflare API credentials for dns_cf (scoped Zone:DNS:Edit token)
+      CF_Token: "your-cloudflare-api-token"
+      # A token with Zone:DNS:Edit on the zone is sufficient; CF_Account_ID is
+      # optional (only needed to narrow the zone lookup with broad tokens) and
+      # CF_Zone_ID skips the lookup entirely.
+      # CF_Zone_ID: "your-cloudflare-zone-id"
+
+      # Optional: connect to Tailscale to reach ACL-governed iLOs on your tailnet.
+      # Create a reusable auth key tagged e.g. tag:hpilo-certs, grant that tag ACL
+      # access to the iLO's tailscale IP, and persist ./tailscale so the node
+      # identity survives restarts.
+      # TS_AUTHKEY: "tskey-auth-..."
+      # TS_HOSTNAME: "hpilo-cert"
+
+      # Optional
+      # ILO_RUN_ONCE: "1"        # exit after initial issuance, no renewal daemon
+      # CRON_SCHEDULE: "17 0 * * *"
+      # TZ: "America/New_York"
+    volumes:
+      - ./acme:/acme.sh
+      - ./data:/data
+      - ./tailscale:/var/lib/tailscale
